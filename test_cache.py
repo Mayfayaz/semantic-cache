@@ -1,5 +1,7 @@
 """Tests for semantic_cache. Stdlib only: `python test_cache.py`."""
 
+import os
+import tempfile
 import time
 
 from semantic_cache import SemanticCache
@@ -86,6 +88,34 @@ ttl_cache.put("ephemeral prompt", "gone soon")
 check("present before expiry", ttl_cache.get("ephemeral prompt") is not None)
 time.sleep(0.08)
 check("expired after ttl", ttl_cache.get("ephemeral prompt") is None)
+
+print("persistence")
+tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False).name
+pcache = SemanticCache(similarity_threshold=0.6, max_size=5, ttl_seconds=60)
+pcache.put("the sky is blue", "yes it is")
+pcache.save(tmp)
+loaded = SemanticCache.load(tmp)
+check("config preserved on load",
+      loaded.threshold == 0.6 and loaded.max_size == 5 and loaded.ttl_seconds == 60)
+exact = loaded.get("the sky is blue")
+check("entries survive round trip",
+      exact is not None and exact[0] == "yes it is" and abs(exact[1] - 1.0) < 1e-9)
+check("semantic match works after load",
+      loaded.get("please tell me the sky is blue") is not None)
+
+expiring = SemanticCache(ttl_seconds=0.05)
+expiring.put("ephemeral prompt", "gone soon")
+time.sleep(0.08)
+expiring.save(tmp)
+reloaded = SemanticCache.load(tmp)
+check("expired entries dropped on load", len(reloaded) == 0)
+
+try:
+    SemanticCache.load("/nonexistent-dir-xyz/nope.json")
+    check("loading a missing file raises", False)
+except FileNotFoundError:
+    check("loading a missing file raises", True)
+os.unlink(tmp)
 
 print(f"\n{PASS} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

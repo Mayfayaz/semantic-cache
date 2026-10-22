@@ -21,7 +21,7 @@ Standard caches match on exact prompt equality. This cache additionally matches 
 
 ## Why it matters
 
-Production LLM applications (chatbots, RAG pipelines, agents) exhibit high prompt repetition: retries, shared templates, and common questions. Semantic caching reduces inference cost and p99 latency. Systems such as GPTCache report 30–60% hit rates on real traffic. This project implements the core mechanism from scratch in ~150 lines of readable Python.
+Production LLM applications (chatbots, RAG pipelines, agents) exhibit high prompt repetition: retries, shared templates, and common questions. Semantic caching reduces inference cost and p99 latency. Systems such as GPTCache report 30–60% hit rates on real traffic. This project implements the core mechanism from scratch in ~200 lines of readable Python.
 
 ## How it works
 
@@ -29,6 +29,7 @@ Production LLM applications (chatbots, RAG pipelines, agents) exhibit high promp
 - **Similarity** — cosine similarity against stored prompts. Matches above the threshold (default 0.60, calibrated for the trigram embedding) return the stored response.
 - **Eviction and expiry** — LRU eviction at `max_size`; optional per-entry TTL.
 - **Statistics** — `CacheStats` records total calls, exact hits, semantic hits, misses, and hit rate.
+- **Persistence** — `cache.save(path)` writes entries and configuration to a JSON snapshot (stdlib-only); `SemanticCache.load(path)` restores them, dropping entries that expired past their TTL. Stored embeddings are reused on load, so restoration works even without the original `embed` callable.
 
 ## Run
 
@@ -36,7 +37,7 @@ Python 3.9+, no dependencies, no API keys.
 
 ```bash
 python demo.py        # 5 prompts, 3 model calls: 2 served from cache
-python test_cache.py  # 19 tests: embeddings, hits/misses, eviction, TTL
+python test_cache.py  # 24 tests: embeddings, hits/misses, eviction, TTL, persistence
 ```
 
 ## Usage
@@ -51,6 +52,9 @@ def my_llm(prompt: str) -> str:
 
 answer = cache.call("What is the capital of France?", my_llm)
 print(cache.stats)
+
+cache.save("cache.json")                    # persist entries and config
+restored = SemanticCache.load("cache.json")  # restore in a later process
 ```
 
 ## Project structure
@@ -68,7 +72,7 @@ semantic-cache/
 ## Limitations
 
 - The built-in embedding measures surface similarity. Heavily reworded paraphrases may fall below the threshold; supply a production embedding model via `embed=` for those cases.
-- In-memory only. A Redis or SQLite backend would persist entries across restarts.
+- Persistence is a simple JSON snapshot written by a single process. Multi-process or large-scale deployments would use a real store such as Redis or SQLite.
 - No streaming support. Cached streaming responses would require chunk replay.
 
 ## License

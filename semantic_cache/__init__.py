@@ -3,4 +3,4 @@
 from .cache import Embedding, SemanticCache, CacheStats
 
 __all__ = ["Embedding", "SemanticCache", "CacheStats"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

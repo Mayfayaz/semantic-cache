@@ -15,11 +15,14 @@ embedding model by passing any ``embed(text) -> list[float]`` callable.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+import os
 import re
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 
@@ -185,3 +188,61 @@ class SemanticCache:
 
     def clear(self) -> None:
         self._entries.clear()
+
+    # -- persistence ---------------------------------------------------------
+
+    def save(self, path: str | Path) -> None:
+        """Persist entries and config to a JSON file (stdlib-only).
+
+        Stored embeddings are written along with each entry, so loading
+        works even when the original ``embed`` callable is unavailable.
+        Pass the same ``embed`` callable to :meth:`load` so that *new*
+        prompts are embedded consistently with the stored ones.
+        """
+        data = {
+            "format": "semantic-cache/v1",
+            "threshold": self.threshold,
+            "max_size": self.max_size,
+            "ttl_seconds": self.ttl_seconds,
+            "entries": [
+                {
+                    "prompt": e.prompt,
+                    "response": e.response,
+                    "embedding": e.embedding,
+                    "created_at": e.created_at,
+                }
+                for e in self._entries.values()
+            ],
+        }
+        with open(os.fspath(path), "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    @classmethod
+    def load(cls, path: str | Path, embed: Callable[[str], List[float]] = trigram_embed) -> "SemanticCache":
+        """Load a cache previously written with :meth:`save`.
+
+        Entries already past ``ttl_seconds`` are dropped. Returns a fresh
+        cache; loading never mutates the file.
+        """
+        with open(os.fspath(path), encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("format") != "semantic-cache/v1":
+            raise ValueError(f"unsupported cache file format: {data.get('format')!r}")
+        cache = cls(
+            similarity_threshold=data["threshold"],
+            max_size=data["max_size"],
+            ttl_seconds=data.get("ttl_seconds"),
+            embed=embed,
+        )
+        now = time.time()
+        for raw in data.get("entries", []):
+            entry = CacheEntry(
+                prompt=raw["prompt"],
+                response=raw["response"],
+                embedding=raw["embedding"],
+                created_at=raw["created_at"],
+            )
+            if cache._expired(entry, now):
+                continue
+            cache._entries[entry.prompt] = entry
+        return cache
